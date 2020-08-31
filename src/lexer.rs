@@ -129,7 +129,7 @@ impl Lexer {
         }
         let num = s
             .parse()
-            .expect(format!("Failed to parse as an integer: {}", s).as_str());
+            .unwrap_or_else(|_| panic!("Failed to parse as an integer: {}", s));
         Token::Num(num)
     }
 

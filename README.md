@@ -5,12 +5,12 @@ A recreation of the final project for a compilers class I took in college, rewri
 ## Grammar
 
 ```
-program -> var_section body
-var_section -> id_list SEMICOLON
+program -> var_declaration body
+var_declaration -> id_list SEMICOLON
 id_list -> ID COMMA id_list | ID
 body -> LBRACE stmt_list RBRACE
 stmt_list -> stmt stmt_list | stmt
-stmt -> assign_stmt | print_stmt | while_stmt | if_stmt | switch_stmt
+stmt -> assign_stmt | print_stmt | while_stmt | if_stmt | switch_stmt | for_stmt
 assign_stmt -> ID EQUAL primary SEMICOLON
 assign_stmt -> ID EQUAL expr SEMICOLON
 expr -> primary op primary
