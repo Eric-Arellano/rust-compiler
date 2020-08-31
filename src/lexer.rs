@@ -31,21 +31,6 @@ pub enum Token {
     Id(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct InvalidTokenError(String);
-
-impl std::fmt::Display for InvalidTokenError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for InvalidTokenError {
-    fn description(&self) -> &str {
-        &self.0
-    }
-}
-
 pub struct Lexer {
     /// A buffer which tracks which `char`s have already been consumed from the input program.
     input_buffer: InputBuffer,
@@ -64,43 +49,48 @@ impl Lexer {
     }
 
     /// Get the next token in the program.
-    pub fn get_token(&mut self) -> Result<Token, InvalidTokenError> {
+    ///
+    /// # Panics:
+    ///
+    /// `get_token` will panic if it encounters invalid tokens.
+    #[track_caller]
+    pub fn get_token(&mut self) -> Token {
         if let Some(token) = self.unconsumed_tokens.pop() {
-            return Ok(token);
+            return token;
         }
 
         self.skip_space();
         match self.input_buffer.get_char() {
-            None => Ok(Token::EndOfFile),
+            None => Token::EndOfFile,
             Some(c) => match c {
-                '+' => Ok(Token::Plus),
-                '-' => Ok(Token::Minus),
-                '/' => Ok(Token::Div),
-                '*' => Ok(Token::Mult),
-                '=' => Ok(Token::Equal),
-                ':' => Ok(Token::Colon),
-                ',' => Ok(Token::Comma),
-                ';' => Ok(Token::Semicolon),
-                '(' => Ok(Token::LParen),
-                ')' => Ok(Token::RParen),
-                '{' => Ok(Token::LBrace),
-                '}' => Ok(Token::RBrace),
-                '>' => Ok(Token::Greater),
+                '+' => Token::Plus,
+                '-' => Token::Minus,
+                '/' => Token::Div,
+                '*' => Token::Mult,
+                '=' => Token::Equal,
+                ':' => Token::Colon,
+                ',' => Token::Comma,
+                ';' => Token::Semicolon,
+                '(' => Token::LParen,
+                ')' => Token::RParen,
+                '{' => Token::LBrace,
+                '}' => Token::RBrace,
+                '>' => Token::Greater,
                 '<' => match self.input_buffer.get_char() {
-                    Some('>') => Ok(Token::NotEqual),
+                    Some('>') => Token::NotEqual,
                     Some(c) => {
                         self.input_buffer.unget_char(c);
-                        Ok(Token::Less)
+                        Token::Less
                     }
-                    None => Ok(Token::Less),
+                    None => Token::Less,
                 },
                 _ => {
                     if c.is_ascii_digit() {
                         self.parse_num(c)
                     } else if c.is_ascii_alphabetic() {
-                        Ok(self.parse_id_or_keyword(c))
+                        self.parse_id_or_keyword(c)
                     } else {
-                        Err(InvalidTokenError(format!("Unrecognized character: {}", c)))
+                        panic!("Unrecognized character: {}", c)
                     }
                 }
             },
@@ -125,7 +115,8 @@ impl Lexer {
         }
     }
 
-    fn parse_num(&mut self, first_char: char) -> Result<Token, InvalidTokenError> {
+    #[track_caller]
+    fn parse_num(&mut self, first_char: char) -> Token {
         let mut s = String::new();
         s.push(first_char);
         while let Some(c) = self.input_buffer.get_char() {
@@ -136,10 +127,10 @@ impl Lexer {
                 break;
             }
         }
-        match s.parse() {
-            Ok(n) => Ok(Token::Num(n)),
-            Err(e) => Err(InvalidTokenError(format!("{}", e))),
-        }
+        let num = s
+            .parse()
+            .expect(format!("Failed to parse as an integer: {}", s).as_str());
+        Token::Num(num)
     }
 
     fn parse_id_or_keyword(&mut self, first_char: char) -> Token {
@@ -204,14 +195,14 @@ fn test_input_buffer() {
 fn test_get_token() {
     // Check parsing the end of the file.
     let mut lexer = Lexer::new(b"");
-    assert_eq!(lexer.get_token(), Ok(Token::EndOfFile));
-    assert_eq!(lexer.get_token(), Ok(Token::EndOfFile));
+    assert_eq!(lexer.get_token(), Token::EndOfFile);
+    assert_eq!(lexer.get_token(), Token::EndOfFile);
 
     fn assert_single_token_parsed(input: &[u8], expected: Token) {
         let mut lexer = Lexer::new(input);
-        assert_eq!(lexer.get_token(), Ok(expected));
+        assert_eq!(lexer.get_token(), expected);
         // Ensure that the Lexer properly "consumes" the expected token.
-        assert_eq!(lexer.get_token(), Ok(Token::EndOfFile));
+        assert_eq!(lexer.get_token(), Token::EndOfFile);
     }
 
     // Check that single chars can be parsed properly on their own.
@@ -235,9 +226,9 @@ fn test_get_token() {
     // Because we "look ahead", we need to make sure this does not break parsing of subsequent
     // tokens.
     let mut lexer = Lexer::new(b"<+");
-    assert_eq!(lexer.get_token(), Ok(Token::Less));
-    assert_eq!(lexer.get_token(), Ok(Token::Plus));
-    assert_eq!(lexer.get_token(), Ok(Token::EndOfFile));
+    assert_eq!(lexer.get_token(), Token::Less);
+    assert_eq!(lexer.get_token(), Token::Plus);
+    assert_eq!(lexer.get_token(), Token::EndOfFile);
 
     // Check parsing of integers.
     assert_single_token_parsed(b"0", Token::Num(0));
@@ -245,10 +236,10 @@ fn test_get_token() {
     assert_single_token_parsed(b"8131", Token::Num(8131));
     assert_single_token_parsed(b"0002", Token::Num(2));
     let mut lexer = Lexer::new(b"12+24");
-    assert_eq!(lexer.get_token(), Ok(Token::Num(12)));
-    assert_eq!(lexer.get_token(), Ok(Token::Plus));
-    assert_eq!(lexer.get_token(), Ok(Token::Num(24)));
-    assert_eq!(lexer.get_token(), Ok(Token::EndOfFile));
+    assert_eq!(lexer.get_token(), Token::Num(12));
+    assert_eq!(lexer.get_token(), Token::Plus);
+    assert_eq!(lexer.get_token(), Token::Num(24));
+    assert_eq!(lexer.get_token(), Token::EndOfFile);
 
     // Check parsing of keywords.
     assert_single_token_parsed(b"VAR", Token::Var);
@@ -265,25 +256,11 @@ fn test_get_token() {
     assert_single_token_parsed(b"FooBar21", Token::Id("FooBar21".to_string()));
     assert_single_token_parsed(b"vAR", Token::Id("vAR".to_string()));
     let mut lexer = Lexer::new(b"x,y z");
-    assert_eq!(lexer.get_token(), Ok(Token::Id("x".to_string())));
-    assert_eq!(lexer.get_token(), Ok(Token::Comma));
-    assert_eq!(lexer.get_token(), Ok(Token::Id("y".to_string())));
-    assert_eq!(lexer.get_token(), Ok(Token::Id("z".to_string())));
-    assert_eq!(lexer.get_token(), Ok(Token::EndOfFile));
-
-    // Check invalid input. We should be able to gracefully parse the rest of the tokens.
-    let mut lexer = Lexer::new(b"! underscore_banned");
-    assert_eq!(
-        lexer.get_token(),
-        Err(InvalidTokenError("Unrecognized character: !".to_string()))
-    );
-    assert_eq!(lexer.get_token(), Ok(Token::Id("underscore".to_string())));
-    assert_eq!(
-        lexer.get_token(),
-        Err(InvalidTokenError("Unrecognized character: _".to_string()))
-    );
-    assert_eq!(lexer.get_token(), Ok(Token::Id("banned".to_string())));
-    assert_eq!(lexer.get_token(), Ok(Token::EndOfFile));
+    assert_eq!(lexer.get_token(), Token::Id("x".to_string()));
+    assert_eq!(lexer.get_token(), Token::Comma);
+    assert_eq!(lexer.get_token(), Token::Id("y".to_string()));
+    assert_eq!(lexer.get_token(), Token::Id("z".to_string()));
+    assert_eq!(lexer.get_token(), Token::EndOfFile);
 
     // Check that it all works together, including that we handle spaces properly.
     let mut lexer = Lexer::new(
@@ -294,28 +271,34 @@ fn test_get_token() {
            }
         }",
     );
-    let x = Ok(Token::Id("x".to_string()));
-    let y = Ok(Token::Id("y".to_string()));
-    assert_eq!(lexer.get_token(), Ok(Token::Var));
+    let x = Token::Id("x".to_string());
+    let y = Token::Id("y".to_string());
+    assert_eq!(lexer.get_token(), Token::Var);
     assert_eq!(lexer.get_token(), x);
-    assert_eq!(lexer.get_token(), Ok(Token::Comma));
+    assert_eq!(lexer.get_token(), Token::Comma);
     assert_eq!(lexer.get_token(), y);
-    assert_eq!(lexer.get_token(), Ok(Token::Semicolon));
-    assert_eq!(lexer.get_token(), Ok(Token::LBrace));
-    assert_eq!(lexer.get_token(), Ok(Token::If));
+    assert_eq!(lexer.get_token(), Token::Semicolon);
+    assert_eq!(lexer.get_token(), Token::LBrace);
+    assert_eq!(lexer.get_token(), Token::If);
     assert_eq!(lexer.get_token(), x);
-    assert_eq!(lexer.get_token(), Ok(Token::NotEqual));
+    assert_eq!(lexer.get_token(), Token::NotEqual);
     assert_eq!(lexer.get_token(), y);
-    assert_eq!(lexer.get_token(), Ok(Token::LBrace));
-    assert_eq!(lexer.get_token(), Ok(Token::Print));
+    assert_eq!(lexer.get_token(), Token::LBrace);
+    assert_eq!(lexer.get_token(), Token::Print);
     assert_eq!(lexer.get_token(), x);
-    assert_eq!(lexer.get_token(), Ok(Token::Semicolon));
-    assert_eq!(lexer.get_token(), Ok(Token::Print));
+    assert_eq!(lexer.get_token(), Token::Semicolon);
+    assert_eq!(lexer.get_token(), Token::Print);
     assert_eq!(lexer.get_token(), y);
-    assert_eq!(lexer.get_token(), Ok(Token::Semicolon));
-    assert_eq!(lexer.get_token(), Ok(Token::RBrace));
-    assert_eq!(lexer.get_token(), Ok(Token::RBrace));
-    assert_eq!(lexer.get_token(), Ok(Token::EndOfFile));
+    assert_eq!(lexer.get_token(), Token::Semicolon);
+    assert_eq!(lexer.get_token(), Token::RBrace);
+    assert_eq!(lexer.get_token(), Token::RBrace);
+    assert_eq!(lexer.get_token(), Token::EndOfFile);
+}
+
+#[should_panic(expected = "Unrecognized character: !")]
+#[test]
+fn test_get_token_invalid() {
+    Lexer::new(b"!").get_token();
 }
 
 #[test]
@@ -323,7 +306,7 @@ fn test_unget_token() {
     let mut lexer = Lexer::new(b"");
     lexer.unget_token(Token::Colon);
     lexer.unget_token(Token::LParen);
-    assert_eq!(lexer.get_token(), Ok(Token::LParen));
-    assert_eq!(lexer.get_token(), Ok(Token::Colon));
-    assert_eq!(lexer.get_token(), Ok(Token::EndOfFile));
+    assert_eq!(lexer.get_token(), Token::LParen);
+    assert_eq!(lexer.get_token(), Token::Colon);
+    assert_eq!(lexer.get_token(), Token::EndOfFile);
 }
