@@ -2,7 +2,7 @@
 use crate::lexer::{Lexer, Token};
 
 #[derive(Debug, Clone, PartialEq)]
-enum Statement {
+pub enum Statement {
     // TODO: Does this make sense? Just use an Option.
     Noop,
     Print(String),
@@ -16,9 +16,9 @@ enum Statement {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct StatementNode {
-    statement: Statement,
-    next: Option<Box<StatementNode>>,
+pub struct StatementNode {
+    pub statement: Statement,
+    pub next: Option<Box<StatementNode>>,
 }
 
 impl StatementNode {
@@ -38,13 +38,13 @@ impl StatementNode {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Primary {
+pub enum Primary {
     Id(String),
     Num(i64),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-enum ArithmeticOperator {
+pub enum ArithmeticOperator {
     Plus,
     Minus,
     Mult,
@@ -52,23 +52,23 @@ enum ArithmeticOperator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum Assignment {
+pub enum Assignment {
     Primary(Primary),
     Expr(Primary, ArithmeticOperator, Primary),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-enum RelativeOperator {
+pub enum RelativeOperator {
     Less,
     Greater,
     NotEqual,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct Condition {
-    operand1: Primary,
-    operand2: Primary,
-    op: RelativeOperator,
+pub struct Condition {
+    pub operand1: Primary,
+    pub operand2: Primary,
+    pub op: RelativeOperator,
 }
 
 pub struct Parser {
@@ -82,12 +82,11 @@ impl Parser {
         }
     }
 
-    pub fn parse_program(&mut self) {
+    pub fn parse_program(&mut self) -> (Vec<String>, Option<StatementNode>) {
         let var_names = self.parse_var_declaration();
-        println!("Variables: {:?}", var_names);
         let first_statement = self.parse_body();
-        println!("Statements: {:?}", first_statement);
         self.expect(Token::EndOfFile);
+        (var_names, first_statement)
     }
 
     /// Consume the specified token, or panic if it is not the next token.

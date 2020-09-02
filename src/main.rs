@@ -2,10 +2,13 @@ mod compiler;
 mod lexer;
 mod parser;
 
-use crate::parser::Parser;
-
 fn main() {
-    let mut parser = Parser::new(b"a, b; { a = 5 + b; print a; print b; }");
-    parser.parse_program();
-    println!("Parsed!");
+    let result = compiler::execute_program(b"a, b; { a = 5 + b; print a; print b; }");
+    match result {
+        None => {
+            eprintln!("Program did not run.");
+            std::process::exit(0);
+        }
+        Some(res) => print!("{}", res),
+    }
 }
