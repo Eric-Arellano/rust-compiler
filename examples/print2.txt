@@ -1,0 +1,5 @@
+i, j;
+{
+  print i;
+  print j;
+}

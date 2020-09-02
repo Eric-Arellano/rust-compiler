@@ -1,6 +1,4 @@
-mod compiler;
-mod lexer;
-mod parser;
+use compiler::compiler;
 
 fn main() {
     let result = compiler::execute_program(b"a, b; { a = 5 + b; print a; print b; }");
