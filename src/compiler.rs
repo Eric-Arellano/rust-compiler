@@ -1,25 +1,7 @@
 /// The compiler executes the intermediate representation graph created by the Parser.
 use std::collections::HashMap;
 
-use crate::parser::{ArithmeticOperator, Assignment, Parser, Primary, Statement, StatementNode};
-
-struct ProgramCounter {
-    current: Option<Box<StatementNode>>,
-}
-
-impl ProgramCounter {
-    fn new(first_statement: StatementNode) -> ProgramCounter {
-        ProgramCounter {
-            current: Some(Box::new(first_statement)),
-        }
-    }
-
-    fn advance(&mut self) {
-        if let Some(ref current_stmt_node) = self.current {
-            self.current = current_stmt_node.next.clone();
-        }
-    }
-}
+use crate::parser::{ArithmeticOperator, Assignment, Parser, Primary, RelativeOperator, Statement};
 
 struct Variables {
     ids_to_vals: HashMap<String, i64>,
@@ -54,7 +36,6 @@ pub fn execute_program(program: &[u8]) -> Option<String> {
     let (var_names, first_statement) = Parser::new(program).parse_program();
     first_statement.as_ref()?;
     let mut variables = Variables::new(var_names);
-    let mut program_counter = ProgramCounter::new(first_statement.unwrap());
 
     fn resolve_primary(vars: &Variables, primary: &Primary) -> i64 {
         match primary {
@@ -63,15 +44,16 @@ pub fn execute_program(program: &[u8]) -> Option<String> {
         }
     }
 
+    let mut current_opt = Some(Box::new(first_statement.unwrap()));
     let mut result_str = String::new();
     loop {
-        match &program_counter.current {
+        match &current_opt {
             None => break,
             Some(current) => {
-                match &current.statement {
-                    Statement::Noop => (),
+                let advance_to_opt = match &current.statement {
                     Statement::Print(id) => {
-                        result_str.push_str(format!("{}\n", variables.get(id)).as_str())
+                        result_str.push_str(format!("{}\n", variables.get(id)).as_str());
+                        None
                     }
                     Statement::Assign(id, assignment) => {
                         let result = match &assignment {
@@ -88,10 +70,30 @@ pub fn execute_program(program: &[u8]) -> Option<String> {
                             }
                         };
                         variables.set(id, result);
+                        None
                     }
-                    _ => (),
+                    Statement::If {
+                        condition,
+                        true_branch,
+                        false_branch,
+                    } => {
+                        let op1 = resolve_primary(&variables, &condition.operand1);
+                        let op2 = resolve_primary(&variables, &condition.operand2);
+                        let is_true = match condition.op {
+                            RelativeOperator::Less => op1 < op2,
+                            RelativeOperator::Greater => op1 > op2,
+                            RelativeOperator::NotEqual => op1 != op2,
+                        };
+                        let next = if is_true { true_branch } else { false_branch };
+                        Some(next)
+                    }
+                    _ => None,
+                };
+                if let Some(advance_to) = advance_to_opt {
+                    current_opt = advance_to.clone();
+                } else {
+                    current_opt = current.next.clone();
                 }
-                program_counter.advance();
             }
         }
     }

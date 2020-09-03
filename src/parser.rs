@@ -3,14 +3,12 @@ use crate::lexer::{Lexer, Token};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
-    // TODO: Does this make sense? Just use an Option.
-    Noop,
     Print(String),
     Assign(String, Assignment),
     If {
         condition: Condition,
-        true_branch: Box<StatementNode>,
-        false_branch: Box<StatementNode>,
+        true_branch: Option<Box<StatementNode>>,
+        false_branch: Option<Box<StatementNode>>,
     },
     Goto(Box<StatementNode>),
 }
@@ -26,13 +24,6 @@ impl StatementNode {
         match &mut self.next {
             Some(ref mut x) => x.append(v),
             None => self.next = Some(Box::new(v)),
-        }
-    }
-
-    fn new_noop() -> StatementNode {
-        StatementNode {
-            statement: Statement::Noop,
-            next: None,
         }
     }
 }
@@ -175,6 +166,17 @@ impl Parser {
     fn parse_body(&mut self) -> Option<StatementNode> {
         self.expect(Token::LBrace);
 
+        fn is_statement(tok1: &Token, tok2: &Token) -> bool {
+            match (tok1, tok2) {
+                (Token::Id(_), Token::Equal)
+                | (Token::Print, _)
+                | (Token::If, _)
+                | (Token::While, _)
+                | (Token::Switch, _) => true,
+                _ => false,
+            }
+        }
+
         fn parse_statement_list(s: &mut Parser) -> Option<StatementNode> {
             let statement_node_opt = match (s.peek(), s.peek_at_second()) {
                 (Token::Id(_), Token::Equal) => Some(s.parse_assignment()),
@@ -186,21 +188,60 @@ impl Parser {
                 None => None,
                 Some(ref statement_node) => {
                     // Check if there are additional statements to parse.
-                    match (s.peek(), s.peek_at_second()) {
-                        (Token::Id(_), Token::Equal)
-                        | (Token::Print, _)
-                        | (Token::If, _)
-                        | (Token::While, _)
-                        | (Token::Switch, _) => {
-                            let next_statement_node = parse_statement_list(s);
-                            // TODO: this diverges from the C++ implementation for If and While.
-                            // Those are likely broken.
-                            Some(StatementNode {
-                                statement: statement_node.statement.clone(),
-                                next: next_statement_node.map(Box::new),
-                            })
+                    if is_statement(&s.peek(), &s.peek_at_second()) {
+                        let next_statement_node = parse_statement_list(s).map(Box::new);
+                        match &statement_node.statement {
+                            Statement::If {
+                                condition,
+                                true_branch,
+                                false_branch,
+                            } => {
+                                // If it's an `If` statement, and the next node exists, we must
+                                // append the next node to `true_branch` and `false_branch`. The
+                                // `next` value is kept as `None`, as it gets ignored in the
+                                // compiler.
+                                // TODO: fix support for nested ifs.
+                                // TODO: refactor this.
+                                if let Some(ref next_statement) = next_statement_node {
+                                    let updated_true_branch = if let Some(true_stmt) = true_branch {
+                                        let mut true_stmt = true_stmt.clone();
+                                        true_stmt.append(*next_statement.clone());
+                                        Some(true_stmt)
+                                    } else {
+                                        next_statement_node.clone()
+                                    };
+                                    let updated_false_branch =
+                                        if let Some(false_stmt) = false_branch {
+                                            let mut false_stmt = false_stmt.clone();
+                                            false_stmt.append(*next_statement.clone());
+                                            Some(false_stmt)
+                                        } else {
+                                            next_statement_node
+                                        };
+                                    let updated_statement = Statement::If {
+                                        condition: condition.clone(),
+                                        true_branch: updated_true_branch,
+                                        false_branch: updated_false_branch,
+                                    };
+                                    Some(StatementNode {
+                                        statement: updated_statement,
+                                        next: None,
+                                    })
+                                } else {
+                                    Some(statement_node.clone())
+                                }
+                            }
+                            _ => {
+                                // Otherwise, point the statement's `next` value to the next
+                                // node.
+                                Some(StatementNode {
+                                    statement: statement_node.statement.clone(),
+                                    next: next_statement_node,
+                                })
+                            }
                         }
-                        _ => statement_node_opt,
+                    } else {
+                        statement_node_opt
                     }
                 }
             }
@@ -262,16 +303,13 @@ impl Parser {
         self.expect(Token::If);
         let condition = self.parse_condition();
         let if_body = self.parse_body();
-        let mut true_branch_stmt = if_body.unwrap_or_else(StatementNode::new_noop);
-        true_branch_stmt.append(StatementNode::new_noop());
         StatementNode {
             statement: Statement::If {
                 condition,
-                true_branch: Box::new(true_branch_stmt),
-                false_branch: Box::new(StatementNode::new_noop()),
+                true_branch: if_body.map(Box::new),
+                false_branch: None,
             },
-            // TODO: Why is this set, rather than using None?
-            next: Some(Box::new(StatementNode::new_noop())),
+            next: None,
         }
     }
 
@@ -337,18 +375,18 @@ fn test_parse_if() {
         Parser::new(b"IF a <> 2 { print a; }").parse_if(),
         StatementNode {
             statement: Statement::If {
-                true_branch: Box::new(StatementNode {
+                true_branch: Some(Box::new(StatementNode {
                     statement: Statement::Print("a".to_string()),
-                    next: Some(Box::new(StatementNode::new_noop())),
-                }),
-                false_branch: Box::new(StatementNode::new_noop()),
+                    next: None,
+                })),
+                false_branch: None,
                 condition: Condition {
                     operand1: Primary::Id("a".to_string()),
                     operand2: Primary::Num(2),
                     op: RelativeOperator::NotEqual
                 }
             },
-            next: Some(Box::new(StatementNode::new_noop()))
+            next: None
         }
     );
 }
