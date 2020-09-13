@@ -1,5 +1,5 @@
 /// The parser converts `lexer::Token`s into an AST according to the grammar in README.md.
-use crate::lexer::{Lexer, Token};
+use crate::tokenizer::{Token, Tokenizer};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
@@ -63,13 +63,13 @@ pub struct Condition {
 }
 
 pub struct Parser {
-    lexer: Lexer,
+    tokenizer: Tokenizer,
 }
 
 impl Parser {
     pub fn new(input: &[u8]) -> Parser {
         Parser {
-            lexer: Lexer::new(input),
+            tokenizer: Tokenizer::new(input),
         }
     }
 
@@ -86,7 +86,7 @@ impl Parser {
     /// (like `Id` and `Num`).
     #[track_caller]
     fn expect(&mut self, token: Token) {
-        let parsed = self.lexer.get_token();
+        let parsed = self.tokenizer.next();
         if parsed != token {
             panic!("Unexpected token: {:?}, expected: {:?}", parsed, token);
         }
@@ -95,7 +95,7 @@ impl Parser {
     /// Consume an `Id` token and return its `String`, or panic if the next token is not an `Id`.
     #[track_caller]
     fn expect_id(&mut self) -> String {
-        match self.lexer.get_token() {
+        match self.tokenizer.next() {
             Token::Id(n) => n,
             tok => panic!("Unexpected token: {:?}, expected: Id.", tok),
         }
@@ -104,7 +104,7 @@ impl Parser {
     // Consume a `Num` token and return its `i64`, or panic if the next token is not a `Num`.
     #[track_caller]
     fn expect_num(&mut self) -> i64 {
-        match self.lexer.get_token() {
+        match self.tokenizer.next() {
             Token::Num(i) => i,
             tok => panic!("Unexpected token: {:?}, expected: Num.", tok),
         }
@@ -113,27 +113,11 @@ impl Parser {
     // Consume a `Num` or `Id` token, or panic if the next token is not one of these two`.
     #[track_caller]
     fn expect_primary(&mut self) -> Primary {
-        match self.lexer.get_token() {
+        match self.tokenizer.next() {
             Token::Id(s) => Primary::Id(s),
             Token::Num(i) => Primary::Num(i),
             tok => panic!("Unexpected token: {:?}, expected: Num or Id.", tok),
         }
-    }
-
-    /// Peek at what the next token will be without actually consuming the value.
-    fn peek(&mut self) -> Token {
-        let t = self.lexer.get_token();
-        self.lexer.unget_token(t.clone());
-        t
-    }
-
-    /// Peek at what the second-upcoming token will be without actually consuming the value.
-    fn peek_at_second(&mut self) -> Token {
-        let t1 = self.lexer.get_token();
-        let t2 = self.lexer.get_token();
-        self.lexer.unget_token(t2.clone());
-        self.lexer.unget_token(t1);
-        t2
     }
 
     /// Get all variables to be used in the program.
@@ -147,7 +131,7 @@ impl Parser {
             parsed_ids: &'a mut Vec<String>,
         ) -> &'a mut Vec<String> {
             parsed_ids.push(s.expect_id());
-            match s.peek() {
+            match s.tokenizer.peek() {
                 Token::Comma => {
                     s.expect(Token::Comma);
                     parse_id_list(s, parsed_ids)
@@ -178,7 +162,7 @@ impl Parser {
         }
 
         fn parse_statement_list(s: &mut Parser) -> Option<StatementNode> {
-            let statement_node_opt = match (s.peek(), s.peek_at_second()) {
+            let statement_node_opt = match (s.tokenizer.peek(), s.tokenizer.peek_at_second()) {
                 (Token::Id(_), Token::Equal) => Some(s.parse_assignment()),
                 (Token::Print, _) => Some(s.parse_print()),
                 (Token::If, _) => Some(s.parse_if()),
@@ -188,7 +172,7 @@ impl Parser {
                 None => None,
                 Some(ref statement_node) => {
                     // Check if there are additional statements to parse.
-                    if is_statement(&s.peek(), &s.peek_at_second()) {
+                    if is_statement(&s.tokenizer.peek(), &s.tokenizer.peek_at_second()) {
                         let next_statement_node = parse_statement_list(s).map(Box::new);
                         match &statement_node.statement {
                             Statement::If {
@@ -256,8 +240,8 @@ impl Parser {
         let id = self.expect_id();
         self.expect(Token::Equal);
 
-        let is_expression = match self.peek() {
-            Token::Id(_) | Token::Num(_) => match self.peek_at_second() {
+        let is_expression = match self.tokenizer.peek() {
+            Token::Id(_) | Token::Num(_) => match self.tokenizer.peek_at_second() {
                 Token::Plus | Token::Minus | Token::Mult | Token::Div => true,
                 _ => false,
             },
@@ -266,7 +250,7 @@ impl Parser {
 
         let assignment = if is_expression {
             let primary1 = self.expect_primary();
-            let op = match self.lexer.get_token() {
+            let op = match self.tokenizer.next() {
                 Token::Plus => ArithmeticOperator::Plus,
                 Token::Minus => ArithmeticOperator::Minus,
                 Token::Mult => ArithmeticOperator::Mult,
@@ -315,7 +299,7 @@ impl Parser {
 
     fn parse_condition(&mut self) -> Condition {
         let operand1 = self.expect_primary();
-        let op = match self.lexer.get_token() {
+        let op = match self.tokenizer.next() {
             Token::Less => RelativeOperator::Less,
             Token::Greater => RelativeOperator::Greater,
             Token::NotEqual => RelativeOperator::NotEqual,

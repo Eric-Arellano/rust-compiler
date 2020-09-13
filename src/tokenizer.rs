@@ -31,7 +31,7 @@ pub enum Token {
     Id(String),
 }
 
-pub struct Lexer {
+pub struct Tokenizer {
     /// A buffer which tracks which `char`s have already been consumed from the input program.
     input_buffer: InputBuffer,
     /// A stack of tokens that have already been parsed, but not yet consumed. This allows the
@@ -39,12 +39,12 @@ pub struct Lexer {
     unconsumed_tokens: Vec<Token>,
 }
 
-impl Lexer {
+impl Tokenizer {
     /// Create a lexer that will tokenize the input program.
-    pub fn new(input: &[u8]) -> Lexer {
-        Lexer {
+    pub fn new(input: &[u8]) -> Tokenizer {
+        Tokenizer {
             input_buffer: InputBuffer::new(input),
-            unconsumed_tokens: Vec::new(),
+            unconsumed_tokens: Vec::with_capacity(2),
         }
     }
 
@@ -52,15 +52,15 @@ impl Lexer {
     ///
     /// # Panics:
     ///
-    /// `get_token` will panic if it encounters invalid tokens.
+    /// `next` will panic if it encounters invalid tokens.
     #[track_caller]
-    pub fn get_token(&mut self) -> Token {
+    pub fn next(&mut self) -> Token {
         if let Some(token) = self.unconsumed_tokens.pop() {
             return token;
         }
 
         self.skip_space();
-        match self.input_buffer.get_char() {
+        match self.input_buffer.next() {
             None => Token::EndOfFile,
             Some(c) => match c {
                 '+' => Token::Plus,
@@ -76,12 +76,12 @@ impl Lexer {
                 '{' => Token::LBrace,
                 '}' => Token::RBrace,
                 '>' => Token::Greater,
-                '<' => match self.input_buffer.get_char() {
-                    Some('>') => Token::NotEqual,
-                    Some(c) => {
-                        self.input_buffer.unget_char(c);
-                        Token::Less
+                '<' => match self.input_buffer.peek() {
+                    Some('>') => {
+                        self.input_buffer.next();
+                        Token::NotEqual
                     }
+                    Some(_) => Token::Less,
                     None => Token::Less,
                 },
                 _ => {
@@ -97,19 +97,26 @@ impl Lexer {
         }
     }
 
-    /// Return a token back to the input so that it can be parsed again.
-    ///
-    /// This is useful to "look ahead" to certain tokens without having to consume them.
-    pub fn unget_token(&mut self, token: Token) {
-        self.unconsumed_tokens.push(token);
+    pub fn peek(&mut self) -> Token {
+        let tok = self.next();
+        self.unconsumed_tokens.push(tok.clone());
+        tok
+    }
+
+    pub fn peek_at_second(&mut self) -> Token {
+        let t1 = self.next();
+        let t2 = self.next();
+        self.unconsumed_tokens.push(t2.clone());
+        self.unconsumed_tokens.push(t1);
+        t2
     }
 
     fn skip_space(&mut self) {
-        while let Some(c) = self.input_buffer.get_char() {
+        while let Some(c) = self.input_buffer.peek() {
             if c.is_ascii_whitespace() {
+                self.input_buffer.next();
                 continue;
             } else {
-                self.input_buffer.unget_char(c);
                 break;
             }
         }
@@ -119,11 +126,11 @@ impl Lexer {
     fn parse_num(&mut self, first_char: char) -> Token {
         let mut s = String::new();
         s.push(first_char);
-        while let Some(c) = self.input_buffer.get_char() {
+        while let Some(c) = self.input_buffer.peek() {
             if c.is_ascii_digit() {
+                self.input_buffer.next();
                 s.push(c);
             } else {
-                self.input_buffer.unget_char(c);
                 break;
             }
         }
@@ -136,11 +143,11 @@ impl Lexer {
     fn parse_id_or_keyword(&mut self, first_char: char) -> Token {
         let mut s = String::new();
         s.push(first_char);
-        while let Some(c) = self.input_buffer.get_char() {
+        while let Some(c) = self.input_buffer.peek() {
             if c.is_ascii_alphanumeric() {
+                self.input_buffer.next();
                 s.push(c);
             } else {
-                self.input_buffer.unget_char(c);
                 break;
             }
         }
@@ -159,50 +166,57 @@ impl Lexer {
 }
 
 struct InputBuffer {
-    buffer: Vec<u8>,
+    buffer: Vec<char>,
 }
 
 impl InputBuffer {
     fn new(input: &[u8]) -> InputBuffer {
-        let mut buffer = input.to_vec();
         // Store in reverse order so that we can call `pop()` and `push()` to quickly access the
         // beginning of the program.
-        buffer.reverse();
-        InputBuffer { buffer }
+        InputBuffer {
+            buffer: input.iter().map(|b| *b as char).rev().collect(),
+        }
     }
 
-    fn get_char(&mut self) -> Option<char> {
-        self.buffer.pop().map(|v| v as char)
+    fn peek(&mut self) -> Option<char> {
+        let c = self.buffer.pop();
+        if let Some(c) = c {
+            self.buffer.push(c);
+        }
+        c
     }
 
-    fn unget_char(&mut self, c: char) {
-        self.buffer.push(c as u8);
+    fn next(&mut self) -> Option<char> {
+        self.buffer.pop()
     }
 }
 
 #[test]
 fn test_input_buffer() {
     let mut buffer = InputBuffer::new(b"abc");
-    assert_eq!(buffer.get_char(), Some('a'));
-    assert_eq!(buffer.get_char(), Some('b'));
-    buffer.unget_char('z');
-    assert_eq!(buffer.get_char(), Some('z'));
-    assert_eq!(buffer.get_char(), Some('c'));
-    assert_eq!(buffer.get_char(), None);
+    assert_eq!(buffer.peek(), Some('a'));
+    assert_eq!(buffer.peek(), Some('a'));
+    assert_eq!(buffer.next(), Some('a'));
+    assert_eq!(buffer.peek(), Some('b'));
+    assert_eq!(buffer.next(), Some('b'));
+    assert_eq!(buffer.peek(), Some('c'));
+    assert_eq!(buffer.next(), Some('c'));
+    assert_eq!(buffer.peek(), None);
+    assert_eq!(buffer.next(), None);
 }
 
 #[test]
 fn test_get_token() {
     // Check parsing the end of the file.
-    let mut lexer = Lexer::new(b"");
-    assert_eq!(lexer.get_token(), Token::EndOfFile);
-    assert_eq!(lexer.get_token(), Token::EndOfFile);
+    let mut lexer = Tokenizer::new(b"");
+    assert_eq!(lexer.next(), Token::EndOfFile);
+    assert_eq!(lexer.next(), Token::EndOfFile);
 
     fn assert_single_token_parsed(input: &[u8], expected: Token) {
-        let mut lexer = Lexer::new(input);
-        assert_eq!(lexer.get_token(), expected);
+        let mut lexer = Tokenizer::new(input);
+        assert_eq!(lexer.next(), expected);
         // Ensure that the Lexer properly "consumes" the expected token.
-        assert_eq!(lexer.get_token(), Token::EndOfFile);
+        assert_eq!(lexer.next(), Token::EndOfFile);
     }
 
     // Check that single chars can be parsed properly on their own.
@@ -225,21 +239,21 @@ fn test_get_token() {
     assert_single_token_parsed(b"<>", Token::NotEqual);
     // Because we "look ahead", we need to make sure this does not break parsing of subsequent
     // tokens.
-    let mut lexer = Lexer::new(b"<+");
-    assert_eq!(lexer.get_token(), Token::Less);
-    assert_eq!(lexer.get_token(), Token::Plus);
-    assert_eq!(lexer.get_token(), Token::EndOfFile);
+    let mut lexer = Tokenizer::new(b"<+");
+    assert_eq!(lexer.next(), Token::Less);
+    assert_eq!(lexer.next(), Token::Plus);
+    assert_eq!(lexer.next(), Token::EndOfFile);
 
     // Check parsing of integers.
     assert_single_token_parsed(b"0", Token::Num(0));
     assert_single_token_parsed(b"8", Token::Num(8));
     assert_single_token_parsed(b"8131", Token::Num(8131));
     assert_single_token_parsed(b"0002", Token::Num(2));
-    let mut lexer = Lexer::new(b"12+24");
-    assert_eq!(lexer.get_token(), Token::Num(12));
-    assert_eq!(lexer.get_token(), Token::Plus);
-    assert_eq!(lexer.get_token(), Token::Num(24));
-    assert_eq!(lexer.get_token(), Token::EndOfFile);
+    let mut lexer = Tokenizer::new(b"12+24");
+    assert_eq!(lexer.next(), Token::Num(12));
+    assert_eq!(lexer.next(), Token::Plus);
+    assert_eq!(lexer.next(), Token::Num(24));
+    assert_eq!(lexer.next(), Token::EndOfFile);
 
     // Check parsing of keywords.
     assert_single_token_parsed(b"VAR", Token::Var);
@@ -255,15 +269,15 @@ fn test_get_token() {
     assert_single_token_parsed(b"x", Token::Id("x".to_string()));
     assert_single_token_parsed(b"FooBar21", Token::Id("FooBar21".to_string()));
     assert_single_token_parsed(b"vAR", Token::Id("vAR".to_string()));
-    let mut lexer = Lexer::new(b"x,y z");
-    assert_eq!(lexer.get_token(), Token::Id("x".to_string()));
-    assert_eq!(lexer.get_token(), Token::Comma);
-    assert_eq!(lexer.get_token(), Token::Id("y".to_string()));
-    assert_eq!(lexer.get_token(), Token::Id("z".to_string()));
-    assert_eq!(lexer.get_token(), Token::EndOfFile);
+    let mut lexer = Tokenizer::new(b"x,y z");
+    assert_eq!(lexer.next(), Token::Id("x".to_string()));
+    assert_eq!(lexer.next(), Token::Comma);
+    assert_eq!(lexer.next(), Token::Id("y".to_string()));
+    assert_eq!(lexer.next(), Token::Id("z".to_string()));
+    assert_eq!(lexer.next(), Token::EndOfFile);
 
     // Check that it all works together, including that we handle spaces properly.
-    let mut lexer = Lexer::new(
+    let mut lexer = Tokenizer::new(
         b"VAR x, y;
         { IF x <> y {
            print x;
@@ -273,40 +287,37 @@ fn test_get_token() {
     );
     let x = Token::Id("x".to_string());
     let y = Token::Id("y".to_string());
-    assert_eq!(lexer.get_token(), Token::Var);
-    assert_eq!(lexer.get_token(), x);
-    assert_eq!(lexer.get_token(), Token::Comma);
-    assert_eq!(lexer.get_token(), y);
-    assert_eq!(lexer.get_token(), Token::Semicolon);
-    assert_eq!(lexer.get_token(), Token::LBrace);
-    assert_eq!(lexer.get_token(), Token::If);
-    assert_eq!(lexer.get_token(), x);
-    assert_eq!(lexer.get_token(), Token::NotEqual);
-    assert_eq!(lexer.get_token(), y);
-    assert_eq!(lexer.get_token(), Token::LBrace);
-    assert_eq!(lexer.get_token(), Token::Print);
-    assert_eq!(lexer.get_token(), x);
-    assert_eq!(lexer.get_token(), Token::Semicolon);
-    assert_eq!(lexer.get_token(), Token::Print);
-    assert_eq!(lexer.get_token(), y);
-    assert_eq!(lexer.get_token(), Token::Semicolon);
-    assert_eq!(lexer.get_token(), Token::RBrace);
-    assert_eq!(lexer.get_token(), Token::RBrace);
-    assert_eq!(lexer.get_token(), Token::EndOfFile);
+    assert_eq!(lexer.next(), Token::Var);
+    assert_eq!(lexer.next(), x);
+    assert_eq!(lexer.next(), Token::Comma);
+    assert_eq!(lexer.next(), y);
+    assert_eq!(lexer.next(), Token::Semicolon);
+    assert_eq!(lexer.next(), Token::LBrace);
+    assert_eq!(lexer.next(), Token::If);
+    assert_eq!(lexer.next(), x);
+    assert_eq!(lexer.next(), Token::NotEqual);
+    assert_eq!(lexer.next(), y);
+    assert_eq!(lexer.next(), Token::LBrace);
+    assert_eq!(lexer.next(), Token::Print);
+    assert_eq!(lexer.next(), x);
+    assert_eq!(lexer.next(), Token::Semicolon);
+    assert_eq!(lexer.next(), Token::Print);
+    assert_eq!(lexer.next(), y);
+    assert_eq!(lexer.next(), Token::Semicolon);
+    assert_eq!(lexer.next(), Token::RBrace);
+    assert_eq!(lexer.next(), Token::RBrace);
+    assert_eq!(lexer.next(), Token::EndOfFile);
 }
 
 #[should_panic(expected = "Unrecognized character: !")]
 #[test]
 fn test_get_token_invalid() {
-    Lexer::new(b"!").get_token();
+    Tokenizer::new(b"!").next();
 }
 
 #[test]
-fn test_unget_token() {
-    let mut lexer = Lexer::new(b"");
-    lexer.unget_token(Token::Colon);
-    lexer.unget_token(Token::LParen);
-    assert_eq!(lexer.get_token(), Token::LParen);
-    assert_eq!(lexer.get_token(), Token::Colon);
-    assert_eq!(lexer.get_token(), Token::EndOfFile);
+fn test_tokenizer_peek() {
+    let mut lexer = Tokenizer::new(b":(");
+    assert_eq!(lexer.peek(), Token::Colon);
+    assert_eq!(lexer.peek_at_second(), Token::LParen);
 }
