@@ -1,5 +1,6 @@
 /// The parser converts `lexer::Token`s into an AST according to the grammar in README.md.
-use crate::tokenizer::{Token, Tokenizer};
+mod tokenizer;
+use tokenizer::{Token, Tokenizer};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
